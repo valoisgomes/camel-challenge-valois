@@ -1,0 +1,15 @@
+# Build
+/target/
+*.log
+
+# IDEs
+/.idea/
+/.vscode/
+/out/
+/bin/
+
+# OS files
+.DS_Store
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar

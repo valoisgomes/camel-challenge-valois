@@ -15,51 +15,97 @@ import java.util.Optional;
 @Service
 public class OrderService {
 
-  private final OrderRepository repo;
+    private final OrderRepository repo;
 
-  public OrderService(OrderRepository repo) {
-    this.repo = repo;
-  }
+    public OrderService(OrderRepository repo) {
+        this.repo = repo;
+    }
 
-  public static double calculateTotal(List<OrderItem> items) {
-    return items.stream().mapToDouble(i -> i.getQty() * i.getUnitPrice()).sum();
-  }
+    public static double calculateTotal(List<OrderItem> items) {
+        return items.stream().mapToDouble(i -> i.getQty() * i.getUnitPrice()).sum();
+    }
 
-  @Transactional
-  public Order create(NewOrderRequest req) {
-    // TODO: map DTO -> entities, calcular total, salvar, status=NEW
-    throw new UnsupportedOperationException("TODO: implementar criação de pedido");
-  }
+    @Transactional
+    public Order create(NewOrderRequest req) {
+        Order order = new Order();
+        order.setCustomerId(req.getCustomerId());
+        order.setStatus(OrderStatus.NEW);
 
-  public Optional<Order> get(String id) {
-    return repo.findById(id);
-  }
+        List<OrderItem> items = req.getItems().stream().map(i -> {
+            OrderItem item = new OrderItem();
+            item.setSku(i.getSku());
+            item.setQty(i.getQty());
+            item.setUnitPrice(i.getUnitPrice());
+            item.setOrder(order);
+            return item;
+        }).toList();
 
-  public List<Order> list(Optional<OrderStatus> status) {
-    return status.map(repo::findByStatus).orElseGet(repo::findAll);
-  }
+        order.setItems(items);
+        order.setTotal(OrderService.calculateTotal(items));
 
-  @Transactional
-  public Order updateItems(String id, UpdateOrderRequest req) {
-    // TODO: permitir atualizar itens apenas se status=NEW, recalc total
-    throw new UnsupportedOperationException("TODO: implementar atualização de itens");
-  }
+        return repo.save(order);
+    }
 
-  @Transactional
-  public void delete(String id) {
-    // TODO: excluir apenas se status=NEW
-    throw new UnsupportedOperationException("TODO: implementar exclusão de pedido");
-  }
+    @Transactional(readOnly = true)
+    public Optional<Order> get(String id) {
+        return repo.findByIdWithItems(id);
+    }
 
-  @Transactional
-  public void markPaid(String id) {
-    // TODO: alterar status para PAID
-    throw new UnsupportedOperationException("TODO: implementar markPaid");
-  }
+    @Transactional(readOnly = true)
+    public List<Order> list(Optional<OrderStatus> status) {
+        return status.map(repo::findByStatusWithItems)
+                .orElseGet(repo::findAllWithItems);
+    }
 
-  @Transactional
-  public void markFailed(String id) {
-    // TODO: alterar status para FAILED_PAYMENT
-    throw new UnsupportedOperationException("TODO: implementar markFailed");
-  }
+    @Transactional
+    public Order updateItems(String id, UpdateOrderRequest req) {
+        Order order = repo.findByIdWithItems(id).orElseThrow(() ->
+                new IllegalArgumentException("Pedido não encontrado: " + id)
+        );
+        if (order.getStatus() != OrderStatus.NEW) {
+            throw new IllegalStateException("Só é possível editar pedidos com status NEW");
+        }
+
+        List<OrderItem> newItems = req.getItems().stream().map(i -> {
+            OrderItem item = new OrderItem();
+            item.setSku(i.getSku());
+            item.setQty(i.getQty());
+            item.setUnitPrice(i.getUnitPrice());
+            item.setOrder(order);
+            return item;
+        }).toList();
+
+        order.getItems().clear();
+        order.getItems().addAll(newItems);
+        order.setTotal(calculateTotal(newItems));
+
+        return repo.save(order);
+    }
+
+    @Transactional
+    public void delete(String id) {
+        Order order = repo.findByIdWithItems(id).orElseThrow(() ->
+                new IllegalArgumentException("Pedido não encontrado: " + id)
+        );
+        if (order.getStatus() != OrderStatus.NEW) {
+            throw new IllegalStateException("Só é possível excluir pedidos com status NEW");
+        }
+        repo.delete(order);
+    }
+
+    @Transactional
+    public void markPaid(String id) {
+        repo.findById(id).ifPresent(order -> {
+            order.setStatus(OrderStatus.PAID);
+            repo.save(order);
+        });
+    }
+
+    @Transactional
+    public void markFailed(String id) {
+        repo.findById(id).ifPresent(order -> {
+            order.setStatus(OrderStatus.FAILED_PAYMENT);
+            repo.save(order);
+        });
+    }
 }

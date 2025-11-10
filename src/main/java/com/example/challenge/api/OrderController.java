@@ -1,8 +1,9 @@
 package com.example.challenge.api;
 
 import com.example.challenge.api.dto.NewOrderRequest;
+import com.example.challenge.api.dto.OrderMapper;
+import com.example.challenge.api.dto.OrderResponse;
 import com.example.challenge.api.dto.UpdateOrderRequest;
-import com.example.challenge.domain.Order;
 import com.example.challenge.domain.OrderStatus;
 import com.example.challenge.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,53 +22,83 @@ import java.util.Optional;
 @Tag(name="Orders")
 public class OrderController {
 
-  private final OrderService service;
-  private final ProducerTemplate template;
+    private final OrderService service;
+    private final ProducerTemplate template;
 
-  public OrderController(OrderService service, ProducerTemplate template) {
-    this.service = service;
-    this.template = template;
-  }
+    public OrderController(OrderService service, ProducerTemplate template) {
+        this.service = service;
+        this.template = template;
+    }
 
-  @Operation(summary = "Cria um novo pedido")
-  @PostMapping
-  public ResponseEntity<Order> create(@Valid @RequestBody NewOrderRequest req) {
-    // TODO: implementar com service.create(req)
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Cria um novo pedido")
+    @PostMapping
+    public ResponseEntity<OrderResponse> create(@Valid @RequestBody NewOrderRequest req) {
+        var created = service.create(req);
+        var body = OrderMapper.toResponse(created);
+        return ResponseEntity.created(URI.create("/api/orders/" + created.getId())).body(body);
+    }
 
-  @Operation(summary = "Busca um pedido por ID")
-  @GetMapping("/{id}")
-  public ResponseEntity<Order> get(@PathVariable String id) {
-    // TODO: implementar com service.get(id)
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Busca um pedido por ID")
+    @GetMapping("/{id}")
+    public ResponseEntity<OrderResponse> get(@PathVariable("id") String id) {
+        return service.get(id)
+                .map(o -> ResponseEntity.ok(OrderMapper.toResponse(o)))
+                .orElse(ResponseEntity.notFound().build());
+    }
 
-  @Operation(summary = "Lista pedidos (opcional filtrar por status)")
-  @GetMapping
-  public ResponseEntity<List<Order>> list(@RequestParam Optional<OrderStatus> status) {
-    // TODO: implementar com service.list(status)
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Lista pedidos (opcional filtrar por status)")
+    @GetMapping
+    public ResponseEntity<List<OrderResponse>> list(
+            @RequestParam(name = "status", required = false) OrderStatus status) { // <-- nome explícito
+        var list = service.list(Optional.ofNullable(status))
+                .stream().map(OrderMapper::toResponse).toList();
+        return ResponseEntity.ok(list);
+    }
 
-  @Operation(summary = "Atualiza itens de um pedido (apenas se NEW)")
-  @PutMapping("/{id}")
-  public ResponseEntity<Order> update(@PathVariable String id, @Valid @RequestBody UpdateOrderRequest req) {
-    // TODO: implementar com service.updateItems(id, req)
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Atualiza itens de um pedido (apenas se NEW)")
+    @PutMapping("/{id}")
+    public ResponseEntity<OrderResponse> update(@PathVariable("id") String id,
+                                                @Valid @RequestBody UpdateOrderRequest req) {
+        try {
+            var updated = service.updateItems(id, req);
+            return ResponseEntity.ok(OrderMapper.toResponse(updated));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.unprocessableEntity().build();
+        }
+    }
 
-  @Operation(summary = "Exclui um pedido (apenas se NEW)")
-  @DeleteMapping("/{id}")
-  public ResponseEntity<Void> delete(@PathVariable String id) {
-    // TODO: implementar com service.delete(id)
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Exclui um pedido (apenas se NEW)")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable("id") String id) {
+        try {
+            service.delete(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            return ResponseEntity.unprocessableEntity().build();
+        }
+    }
 
-  @Operation(summary = "Processa pagamento do pedido via Camel chamando DummyJSON")
-  @PostMapping("/{id}/pay")
-  public ResponseEntity<Order> pay(@PathVariable String id) {
-    // TODO: validar status, enviar para rota Camel (ex.: direct:payOrder) com headers orderId/amount
-    return ResponseEntity.status(501).build();
-  }
+    @Operation(summary = "Processa pagamento do pedido via Camel chamando DummyJSON")
+    @PostMapping("/{id}/pay")
+    public ResponseEntity<OrderResponse> pay(@PathVariable("id") String id) {
+        var orderOpt = service.get(id);
+        if (orderOpt.isEmpty()) return ResponseEntity.notFound().build();
+        var order = orderOpt.get();
+        if (order.getStatus() != OrderStatus.NEW) return ResponseEntity.unprocessableEntity().build();
+
+        // chamada síncrona pra garantir que o status esteja atualizado ao retornar
+        template.requestBodyAndHeaders(
+                "direct:payOrder",
+                null,
+                java.util.Map.of("orderId", order.getId(), "amount", order.getTotal())
+        );
+
+        return service.get(id)
+                .map(o -> ResponseEntity.ok(OrderMapper.toResponse(o)))
+                .orElse(ResponseEntity.notFound().build());
+    }
 }
