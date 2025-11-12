@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camel-challenge
+  namespace: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: camel-challenge
+  template:
+    metadata:
+      labels:
+        app: camel-challenge
+    spec:
+      containers:
+        - name: app
+          # imagem padrão; o Makefile pode trocar por tag versionada
+          image: ghcr.io/valoisgomes/camel-challenge:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          # probes simples (se tiver Actuator, podemos trocar por HTTP /actuator/health)
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          env:
+            # exemplos — se quiser sobrescrever URLs do application.yaml via env
+            - name: PAYMENT_SUCCESS_URL
+              value: "https://dummyjson.com/http/200"
+            - name: PAYMENT_FAILURE_URL
+              value: "https://dummyjson.com/http/500"
